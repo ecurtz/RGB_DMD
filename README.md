@@ -27,7 +27,9 @@ These are additional third party code required when building RGB_DMD. They are d
 [FastCRC](https://github.com/FrankBoesing/FastCRC) is used to calculate a checksum for DMD frames so they can be uniquely identified.
 
 ### Settings ###
-RGB_DMD should be built to run at the __96MHz optimized (overclock)__ setting using the __Tools : CPU Speed__ menu in the Arduino IDE.
+The Arduino IDE should be set to compile for Teensy by selecting __Teensy 3.1__ from the __Tools : Board__ menu in the Arduino IDE.
+
+RGB_DMD should be built to run at the __96MHz optimized (overclock)__ setting using the __Tools : CPU Speed__ menu.
 
 ## Using DMD Input ##
 Pinball machines use a set of 6 signals to control a plasma or LED DMD. RGB_DMD captures these inputs to determine which CPU system the pin is using and rebuild the display images.
@@ -41,3 +43,6 @@ __ROW CLOCK__: Moves to the next display row. Separate from the column latch bec
 
 ## Using USB Input ##
 RGB_DMD may be controlled over USB from a host computer to store settings for the DMD input or display full color images for homebrew pinball machines.
+### Sending From Python ###
+Using USB input from Python requires the [PySerial Extension](https://pyserial.readthedocs.org/en/latest/). If you are using [PyProcGame](http://pyprocgame.pindev.org) or the [Mission Pinball Framework](https://missionpinball.com) PySerial may already be installed.
+### Sending From C/C++/C# ###
