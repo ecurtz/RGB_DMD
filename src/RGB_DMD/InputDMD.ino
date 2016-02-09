@@ -209,12 +209,13 @@ void configureInputDMD()
   // Adjust isr priorities so SPI0 input preempts PORTB input
   NVIC_SET_PRIORITY(IRQ_PORTB, 32);
   NVIC_SET_PRIORITY(IRQ_SPI0, 0);
+  NVIC_DISABLE_IRQ(IRQ_PORTB);
   
   // Stall waiting for row 0 alignment
   while (!digitalReadFast(DMD_ROW_DATA));
   while (!digitalReadFast(DMD_ROW_CLK));
   do {
-   SPI0_MCR |= SPI_MCR_CLR_RXF;
+    SPI0_MCR |= SPI_MCR_CLR_RXF;
   } while (digitalReadFast(DMD_ROW_CLK));
   if (dmdDataFormat == FORMAT_WPC) {
     while (!digitalReadFast(DMD_OE));
@@ -224,6 +225,7 @@ void configureInputDMD()
   // Turn on the SPI
   SPI0_MCR &= ~SPI_MCR_HALT & ~SPI_MCR_MDIS;
   digitalWriteFast(DMD_CS, LOW);
+  NVIC_ENABLE_IRQ(IRQ_PORTB);
 }
 
 /*
@@ -324,13 +326,13 @@ bool handleInputDMD()
 //      timingChanged = true;
 //      activePlaneTimes[currentPlane] = planeTimes[currentPlane];
 //    }
-    
-    if (currentRow == (ROW_COUNT - 1)) {
+
+      if (currentRow == (ROW_COUNT - 1)) {
 //      if (timingChanged) {
 //        calculatePlaneTimings();
 //        timingChanged = false;
 //      }
- 
+  
       backgroundLayer.swapBuffers(false);
       return true;
     }
@@ -540,7 +542,7 @@ void portb_isr_whitestar(void)
  Combined interrupt for all Port B inputs, Stern SAM version
 */
 void portb_isr_sam(void)
-{  
+{
   uint32_t isfr = PORTB_ISFR;
   PORTB_ISFR = isfr;
 
@@ -559,10 +561,12 @@ void portb_isr_sam(void)
     // Start new SPI plane
     digitalWriteFast(DMD_CS, LOW);
 
+    // This is sort of a hack because we're getting the OE edge before
+    // the row 0 flag, so we begin on plane 1 rather than 0.
     if (rowZero) {
       rowZero = false;
       row = 0;
-      plane = 0;
+      plane = 1;
     }
     else {
       plane++;
@@ -570,7 +574,7 @@ void portb_isr_sam(void)
         plane = 0;
         row++;
         if (row >= ROW_COUNT) {
-          row = 0;
+         row = 0;
         }
         gotRow = true;
       }
@@ -581,7 +585,7 @@ void portb_isr_sam(void)
     dmaSPI0rx->clearComplete();
     dmaSPI0rx->destinationBuffer(plane_buffer, ROW_LENGTH * sizeof(uint16_t));
     dmaSPI0rx->enable();
- 
+
     // Start the plane timer
     // planeStart = micros();
   }

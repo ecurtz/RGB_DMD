@@ -50,8 +50,9 @@ void loop() {
         digitalWriteFast(DMD_ROW_DATA, LOW);
       }
       digitalWriteFast(DMD_DOT_LATCH, HIGH);
-      asm volatile("nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n");
+      asm volatile("nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n");
       digitalWriteFast(DMD_OE, HIGH);
+      asm volatile("nop\n nop\n");
       digitalWriteFast(DMD_DOT_LATCH, LOW);
       asm volatile("nop\n");
       
