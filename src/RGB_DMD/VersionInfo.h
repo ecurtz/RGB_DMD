@@ -7,7 +7,7 @@
 
 const uint8_t versionMajor = 0;
 const uint8_t versionMinor = 6;
-const uint8_t versionBuild = 1;
+const uint8_t versionBuild = 5;
 
 extern char versionString[12];
 extern uint8_t versionLength;

@@ -5,6 +5,7 @@
 
 #include "InputDMD.h"
 #include "MatrixSetup.h"
+#include "Palettes.h"
 
 // Comparison constants
 #define SMALLER -1
@@ -90,8 +91,12 @@ void initializeInputDMD()
 {
   pinMode(DMD_ROW_DATA, INPUT);
   pinMode(DMD_ROW_CLK, INPUT);
-  pinMode(DMD_DOT_LATCH, INPUT);
-  pinMode(DMD_OE, INPUT);
+  pinMode(DMD_DOT_LATCH, INPUT/*_PULLDOWN*/);
+  *portConfigRegister(DMD_DOT_LATCH) |= PORT_PCR_PE;
+  *portConfigRegister(DMD_DOT_LATCH) &= ~PORT_PCR_PS;
+  pinMode(DMD_OE, INPUT/*_PULLDOWN*/);
+  *portConfigRegister(DMD_OE) |= PORT_PCR_PE;
+  *portConfigRegister(DMD_OE) &= ~PORT_PCR_PS;
   pinMode(DMD_CS, OUTPUT);
 }
 
@@ -183,9 +188,9 @@ void configureInputDMD()
   
   // Enable interrupts for DMD inputs
   if (dmdDataFormat == FORMAT_WPC) {
-     // Enable Row Zero interrupt
+    // Enable Row Zero interrupt
     attachInterrupt(digitalPinToInterrupt(DMD_ROW_DATA), portb_isr_wpc, RISING);
-   // Enable Dot Latch interrupt
+    // Enable Dot Latch interrupt
     attachInterrupt(digitalPinToInterrupt(DMD_OE), portb_isr_wpc, RISING);
     // Replace global PORTB isr
     attachInterruptVector(IRQ_PORTB, portb_isr_wpc);
@@ -198,13 +203,21 @@ void configureInputDMD()
     // Replace global PORTB isr
     attachInterruptVector(IRQ_PORTB, portb_isr_whitestar);
   }
-  else {
+  else if (dmdDataFormat == FORMAT_SAM) {
     // Enable Row Zero interrupt
     attachInterrupt(digitalPinToInterrupt(DMD_ROW_DATA), portb_isr_sam, RISING);
     // Enable Dot Latch interrupt
     attachInterrupt(digitalPinToInterrupt(DMD_OE), portb_isr_sam, FALLING);
     // Replace global PORTB isr
     attachInterruptVector(IRQ_PORTB, portb_isr_sam);
+  }
+  else if (dmdDataFormat == FORMAT_PREMIER) {
+    // Enable Row Zero interrupt
+    attachInterrupt(digitalPinToInterrupt(DMD_ROW_DATA), portb_isr_premier, RISING);
+    // Enable Dot Latch interrupt
+    attachInterrupt(digitalPinToInterrupt(DMD_OE), portb_isr_premier, FALLING);
+    // Replace global PORTB isr
+    attachInterruptVector(IRQ_PORTB, portb_isr_premier);
   }
   // Adjust isr priorities so SPI0 input preempts PORTB input
   NVIC_SET_PRIORITY(IRQ_PORTB, 32);
@@ -235,7 +248,8 @@ void calculatePlaneTimings()
 {
   // Determine the output enable timings for the DMD
   // These could be:
-  // 1 plane per row, enable times equal - WPC
+  // 1 plane per row, enable times equal < 128 fps - WPC
+  // 1 plane per row, enable times equal > 200 fps - Premier
   // 2 planes per row, varying enable times - WhiteStar 
   // 4 planes per row, enable times equal - P-ROC boot
   // 4 planes per row, varying enable times - SAM, P-ROC normal
@@ -262,6 +276,9 @@ void calculatePlaneTimings()
 //        dmdDataFormat = FORMAT_PROC_BOOT;
 //      }
     }
+  }
+  else if (planeTimes[0] < 100) {
+    dmdDataFormat = FORMAT_PREMIER;
   }
 
   for (int i = 0; i < PLANE_COUNT; i++) {
@@ -291,6 +308,9 @@ void calculatePlaneTimings()
   else if (dmdDataFormat == FORMAT_SAM) {
     matrix.setRefreshRate(60);
   }
+  if (dmdDataFormat == FORMAT_PREMIER) {
+    matrix.setRefreshRate(94);
+  }
 }
 
 /*
@@ -301,7 +321,7 @@ bool handleInputDMD()
   if (gotRow) {
     uint8_t currentRow = row;
     currentRow = (currentRow > 0) ? currentRow - 1: ROW_COUNT - 1;  
- //   uint8_t currentPlane = plane;
+//    uint8_t currentPlane = plane;
 
     gotRow = false;
    
@@ -317,7 +337,11 @@ bool handleInputDMD()
       case FORMAT_SAM:
         updateSAM(currentRow);
         break;
-    }
+        
+       case FORMAT_PREMIER:
+        updatePremier(currentRow);
+        break;
+   }
     
 //    if ((signed long) planeTimes[currentPlane] < 0) {
 //      planeTimes[currentPlane] = activePlaneTimes[currentPlane];
@@ -416,6 +440,33 @@ void updateSAM(uint8_t currentRow)
   }
 }
 
+void updatePremier(uint8_t currentRow)
+{
+  rgb24* pixelBuffer = backgroundLayer.backBuffer();
+  pixelBuffer += currentRow * COL_COUNT;
+
+  for (int j = 0; j < ROW_LENGTH; j++) {
+    uint16_t dots0 = wpc_planes[0][currentRow][j];
+    uint16_t dots1 = wpc_planes[1][currentRow][j];
+    uint16_t dots2 = wpc_planes[2][currentRow][j];
+    uint16_t dots3 = wpc_planes[3][currentRow][j];
+ 
+    uint16_t dotMask = 0x8000;
+    while (dotMask) {
+      uint8_t colorEntry = 0;
+      // Premier style equally weighted planes
+      if (dots0 & dotMask) { colorEntry += 4; }
+      if (dots1 & dotMask) { colorEntry += 4; }
+      if (dots2 & dotMask) { colorEntry += 4; }
+      if (dots3 & dotMask) { colorEntry += 4; }
+      if (colorEntry >= PALETTE_ENTRIES) { colorEntry = (PALETTE_ENTRIES - 1); }
+      
+      *pixelBuffer = activePalette[colorEntry];
+      pixelBuffer++;
+      dotMask >>= 1;
+    }
+  }
+}
 
 /*
  Minimal interrupts for testing configuration
@@ -588,6 +639,57 @@ void portb_isr_sam(void)
 
     // Start the plane timer
     // planeStart = micros();
+  }
+}
+
+/*
+ Combined interrupt for all Port B inputs, Gottlieb/Premier version
+*/
+void portb_isr_premier(void)
+{  
+  uint32_t isfr = PORTB_ISFR;
+  PORTB_ISFR = isfr;
+
+  // Check for row zero marker
+  if (isfr & DMD_ROW_DATA_BITMASK) {
+    rowZero = true;
+  } 
+  
+  // Check for output enable
+  if (isfr & DMD_OE_BITMASK) {   
+    if (rowZero) {
+      rowZero = false;
+      row = 0;
+      plane++;
+      if (plane >= PLANE_COUNT) {
+        plane = 0;
+      }
+    }
+    
+    // Use fake chip select to end plane
+    digitalWriteFast(DMD_CS, HIGH);
+
+    memcpy(wpc_planes[plane][row], plane_buffer, ROW_LENGTH * sizeof(uint16_t));
+ 
+    // Start new SPI plane
+    digitalWriteFast(DMD_CS, LOW);
+   
+    // Reset the DMA transfer
+    dmaSPI0rx->disable();
+    dmaSPI0rx->clearComplete();
+    dmaSPI0rx->destinationBuffer(plane_buffer, ROW_LENGTH * sizeof(uint16_t));
+    dmaSPI0rx->enable();
+
+    row++;
+    if (row >= ROW_COUNT) {
+      row = 0;
+    }
+    else if (plane == (PLANE_COUNT - 1)) {
+      gotRow = true;
+    }
+   
+    // Start the plane timer
+//    planeStart = micros();
   }
 }
 
