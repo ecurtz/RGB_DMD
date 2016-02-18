@@ -1,5 +1,5 @@
 
-// Simulated WPC DMD output
+// Simulated SAM DMD output
 // Timings valid for 96MHz
 
 // Output pins
@@ -38,84 +38,55 @@ void setup() {
 
 void loop() {
   uint8_t frame_cutoff = 0;
-  for (int frame = 0; frame < 3; frame++) {
-    frame_cutoff = (frame * 4) + 3;
+  for (int frame = 0; frame < 4; frame++) {
+    frame_cutoff = frame * 4;
     
     digitalWriteFast(DMD_ROW_DATA, HIGH);
     for (int row = 0; row < ROW_COUNT; row++) {
-      for (int i = 0; i < 512; i++) {
-        asm volatile("nop\n");
-      }
-      
       digitalWriteFast(DMD_OE, HIGH);
-      for (int i = 0; i < 2592; i++) {
-        asm volatile("nop\n");
-      }
-      
-      for (int col = 0; col < 116; col++) {
+      asm volatile("nop\n nop\n nop\n");  
+          
+      for (int col = 0; col < COL_COUNT; col++) {
+        for (int i = 0; i < 4; i++) {
+          asm volatile("nop\n nop\n nop\n");
+        }
+        asm volatile("nop\n nop\n nop\n");
+        digitalWriteFast(DMD_DOT_CLK, LOW);
+        for (int i = 0; i < 2; i++) {
+          asm volatile("nop\n nop\n nop\n nop\n");
+        }
         if (dots[row][col] > frame_cutoff) {
           digitalWriteFast(DMD_DOTS, HIGH);
         }
         else {
           digitalWriteFast(DMD_DOTS, LOW);
         }
-        for (int i = 0; i < 3; i++) {
-          asm volatile("nop\n nop\n nop\n");
+        for (int i = 0; i < 2; i++) {
+          asm volatile("nop\n nop\n nop\n nop\n");
         }
         digitalWriteFast(DMD_DOT_CLK, HIGH);
-        for (int i = 0; i < 8; i++) {
-          asm volatile("nop\n nop\n nop\n");
-       }
-        digitalWriteFast(DMD_DOT_CLK, LOW);
-        for (int i = 0; i < 3; i++) {
-          asm volatile("nop\n nop\n nop\n");
-        }
-      }
-  
+     }
+
+      asm volatile("nop\n");
       digitalWriteFast(DMD_OE, LOW);
-      
-      for (int col = 116; col < 127; col++) {
-        if (dots[row][col] > frame_cutoff) {
-          digitalWriteFast(DMD_DOTS, HIGH);
-        }
-        else {
-          digitalWriteFast(DMD_DOTS, LOW);
-        }
-        for (int i = 0; i < 3; i++) {
-          asm volatile("nop\n nop\n nop\n");
-        }
-        digitalWriteFast(DMD_DOT_CLK, HIGH);
-        for (int i = 0; i < 8; i++) {
-          asm volatile("nop\n nop\n nop\n");
-        }
-        digitalWriteFast(DMD_DOT_CLK, LOW);
-        for (int i = 0; i < 3; i++) {
-          asm volatile("nop\n nop\n nop\n");
-        }
-      }
-      
-      if (dots[row][127] > frame_cutoff) {
-        digitalWriteFast(DMD_DOTS, HIGH);
-      }
-      else {
-        digitalWriteFast(DMD_DOTS, LOW);
-      }
-      for (int i = 0; i < 3; i++) {
+      for (int i = 0; i < 36; i++) {
         asm volatile("nop\n nop\n nop\n");
       }
-      digitalWriteFast(DMD_DOT_CLK, HIGH);
-      for (int i = 0; i < 8; i++) {
-        asm volatile("nop\n nop\n nop\n");
-      }
+      
       digitalWriteFast(DMD_ROW_CLK, LOW);
       digitalWriteFast(DMD_DOT_LATCH, HIGH);
-      for (int i = 0; i < 3; i++) {
+      for (int i = 0; i < 18; i++) {
         asm volatile("nop\n nop\n nop\n");
       }
+      
       digitalWriteFast(DMD_ROW_CLK, HIGH);
       digitalWriteFast(DMD_DOT_LATCH, LOW);
-      digitalWriteFast(DMD_DOT_CLK, LOW);
+      for (int i = 0; i < 16; i++) {
+        asm volatile("nop\n nop\n nop\n");
+      }
+
       digitalWriteFast(DMD_ROW_DATA, LOW);
+      asm volatile("nop\n");
     }
   }
 }
