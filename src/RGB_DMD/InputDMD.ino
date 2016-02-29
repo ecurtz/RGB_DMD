@@ -7,6 +7,9 @@
 #include "MatrixSetup.h"
 #include "Palettes.h"
 
+// Modified input method using DMA completion
+//#define DMA_COMPLETION_ISR 1
+
 // Comparison constants
 #define SMALLER -1
 #define EQUAL 0
@@ -37,10 +40,11 @@ uint8_t checksumByteLast = 5;
 uint32_t lastCheck;
 
 // Variables used in interrupts
-volatile uint16_t plane = 0;
-volatile uint16_t row = 0;
+volatile uint32_t plane = 0;
+volatile uint32_t row = 0;
 volatile bool rowZero = false;
 volatile bool gotRow = false;
+volatile uint32_t receivedRows = 0;
 
 // DMD signal
 uint8_t dmdDataFormat = FORMAT_UNKNOWN;
@@ -172,9 +176,11 @@ void configureInputDMD()
   dmaSPI0rx = new DMAChannel();
   dmaSPI0rx->source((volatile uint16_t&) SPI0_POPR);
   dmaSPI0rx->destinationBuffer(plane_buffer, ROW_LENGTH * sizeof(uint16_t));
-  dmaSPI0rx->disableOnCompletion();
   dmaSPI0rx->triggerAtHardwareEvent(DMAMUX_SOURCE_SPI0_RX);
+#ifndef DMA_COMPLETION_ISR
+  dmaSPI0rx->disableOnCompletion();
   dmaSPI0rx->disable();
+#endif
   
   // Make sure FIFO drain preempts display stuff
   DMAPriorityOrder(*dmaSPI0rx, dmaOutputAddress);
@@ -188,10 +194,18 @@ void configureInputDMD()
   
   // Enable interrupts for DMD inputs
   if (dmdDataFormat == FORMAT_WPC) {
+#if DMA_COMPLETION_ISR
+    // Enable DMA completion interrupt
+    dmaSPI0rx->attachInterrupt(dma_isr_wpc);
+    dmaSPI0rx->interruptAtCompletion();
+    // Enable Output Enable interrupt
+    attachInterrupt(digitalPinToInterrupt(DMD_OE), portb_isr_wpc, RISING);
+#else
     // Enable Row Zero interrupt
     attachInterrupt(digitalPinToInterrupt(DMD_ROW_DATA), portb_isr_wpc, RISING);
-    // Enable Dot Latch interrupt
+    // Enable Output Enable interrupt
     attachInterrupt(digitalPinToInterrupt(DMD_OE), portb_isr_wpc, RISING);
+#endif
     // Replace global PORTB isr
     attachInterruptVector(IRQ_PORTB, portb_isr_wpc);
   }
@@ -206,16 +220,24 @@ void configureInputDMD()
   else if (dmdDataFormat == FORMAT_SAM) {
     // Enable Row Zero interrupt
     attachInterrupt(digitalPinToInterrupt(DMD_ROW_DATA), portb_isr_sam, RISING);
-    // Enable Dot Latch interrupt
+    // Enable Output Enable interrupt
     attachInterrupt(digitalPinToInterrupt(DMD_OE), portb_isr_sam, FALLING);
     // Replace global PORTB isr
     attachInterruptVector(IRQ_PORTB, portb_isr_sam);
   }
   else if (dmdDataFormat == FORMAT_PREMIER) {
+#if DMA_COMPLETION_ISR
+    // Enable DMA completion interrupt
+    dmaSPI0rx->attachInterrupt(dma_isr_premier);
+    dmaSPI0rx->interruptAtCompletion();
+    // Enable Row Zero interrupt
+    attachInterrupt(digitalPinToInterrupt(DMD_ROW_DATA), portb_isr_premier, RISING);
+#else
     // Enable Row Zero interrupt
     attachInterrupt(digitalPinToInterrupt(DMD_ROW_DATA), portb_isr_premier, RISING);
     // Enable Dot Latch interrupt
-    attachInterrupt(digitalPinToInterrupt(DMD_OE), portb_isr_premier, FALLING);
+    attachInterrupt(digitalPinToInterrupt(DMD_DOT_LATCH), portb_isr_premier, RISING);
+#endif
     // Replace global PORTB isr
     attachInterruptVector(IRQ_PORTB, portb_isr_premier);
   }
@@ -239,6 +261,7 @@ void configureInputDMD()
   SPI0_MCR &= ~SPI_MCR_HALT & ~SPI_MCR_MDIS;
   digitalWriteFast(DMD_CS, LOW);
   NVIC_ENABLE_IRQ(IRQ_PORTB);
+  dmaSPI0rx->enable();
 }
 
 /*
@@ -308,8 +331,8 @@ void calculatePlaneTimings()
   else if (dmdDataFormat == FORMAT_SAM) {
     matrix.setRefreshRate(60);
   }
-  if (dmdDataFormat == FORMAT_PREMIER) {
-    matrix.setRefreshRate(94);
+  else if (dmdDataFormat == FORMAT_PREMIER) {
+    matrix.setRefreshRate(120);
   }
 }
 
@@ -318,11 +341,15 @@ void calculatePlaneTimings()
 */
 bool handleInputDMD()
 {
-  if (gotRow) {
-    uint8_t currentRow = row;
-    currentRow = (currentRow > 0) ? currentRow - 1: ROW_COUNT - 1;  
-//    uint8_t currentPlane = plane;
-
+  if (receivedRows != 0) {
+    uint32_t rowFlag = 1;
+    uint8_t currentRow = 0;
+    while ((receivedRows & rowFlag) == 0) {
+      currentRow++;
+      rowFlag = 1 << currentRow;
+    }
+    receivedRows &= ~rowFlag;
+    
     gotRow = false;
    
     switch (dmdDataFormat) {
@@ -356,7 +383,7 @@ bool handleInputDMD()
 //        calculatePlaneTimings();
 //        timingChanged = false;
 //      }
-  
+
       backgroundLayer.swapBuffers(false);
       return true;
     }
@@ -479,6 +506,52 @@ void row_count_isr(void) {
   row++;
 }
 
+
+#ifdef DMA_COMPLETION_ISR
+/*
+ Combined interrupt for all Port B inputs, Williams WPC version
+*/
+void portb_isr_wpc(void)
+{  
+  uint32_t isfr = PORTB_ISFR;
+  PORTB_ISFR = isfr;
+
+  // Check for output enable
+  if (isfr & DMD_OE_BITMASK) {
+    rowZero = digitalReadFast(DMD_ROW_DATA);
+  }
+}
+
+/*
+ DMA completion interrupt, Williams WPC version
+*/
+void dma_isr_wpc(void)
+{
+  dmaSPI0rx->clearInterrupt();
+  
+  if (rowZero) {
+    rowZero = false;
+    row = 0;
+    plane++;
+    if (plane >= PLANE_BLEND_WPC) {
+      plane = 0;
+    }
+  }
+  else {
+    row++;
+    if (row >= ROW_COUNT) {
+      row = 0;
+    }
+  }
+  
+  memcpy(wpc_planes[plane][row], plane_buffer, ROW_LENGTH * sizeof(uint16_t));
+  receivedRows |= (1 << row);
+  
+  gotRow = true;    
+}
+
+#else
+
 /*
  Combined interrupt for all Port B inputs, Williams WPC version
 */
@@ -498,6 +571,7 @@ void portb_isr_wpc(void)
     digitalWriteFast(DMD_CS, HIGH);
     
     memcpy(wpc_planes[plane][row], plane_buffer, ROW_LENGTH * sizeof(uint16_t));
+    receivedRows |= (1 << row);
     
     if (rowZero) {
       rowZero = false;
@@ -514,10 +588,9 @@ void portb_isr_wpc(void)
       }
     }
     
-//    // Flush the receive buffer, in case we're out of sync
-//    SPI0_MCR |= SPI_MCR_HALT;
-//    SPI0_MCR |= SPI_MCR_CLR_RXF;
-//    SPI0_MCR &= ~SPI_MCR_HALT;
+    // Flush the receive buffer, in case we're out of sync
+    SPI0_MCR |= SPI_MCR_HALT;
+    SPI0_MCR |= SPI_MCR_CLR_RXF;
 
     // Reset the DMA transfer
     dmaSPI0rx->disable();
@@ -528,12 +601,14 @@ void portb_isr_wpc(void)
     gotRow = true;
 
     // Start new SPI plane
+    SPI0_MCR &= ~SPI_MCR_HALT;
     digitalWriteFast(DMD_CS, LOW);
    
     // Start the plane timer
     // planeStart = micros();
   }
 }
+#endif
 
 /*
  Combined interrupt for all Port B inputs, Stern Whitestar version
@@ -569,12 +644,13 @@ void portb_isr_whitestar(void)
     else {
       plane++;
       if (plane >= PLANE_COUNT_WHITESTAR) {
+        receivedRows |= (1 << row);
+        gotRow = true;
         plane = 0;
         row++;
         if (row >= ROW_COUNT) {
           row = 0;
         }
-        gotRow = true;
       }
     }
     
@@ -622,12 +698,13 @@ void portb_isr_sam(void)
     else {
       plane++;
       if (plane >= PLANE_COUNT) {
+        receivedRows |= (1 << row);
+        gotRow = true;
         plane = 0;
         row++;
         if (row >= ROW_COUNT) {
          row = 0;
         }
-        gotRow = true;
       }
     }
     
@@ -642,6 +719,49 @@ void portb_isr_sam(void)
   }
 }
 
+#ifdef DMA_COMPLETION_ISR
+/*
+ Combined interrupt for all Port B inputs, Gottlieb/Premier version
+*/
+void portb_isr_premier(void)
+{  
+  uint32_t isfr = PORTB_ISFR;
+  PORTB_ISFR = isfr;
+
+  // Check for output enable
+  if (isfr & DMD_ROW_DATA_BITMASK) {
+    if (!digitalReadFast(DMD_ROW_DATA)) return;
+    rowZero = true;
+  }
+}
+
+/*
+ DMA completion interrupt, Gottlieb/Premier version
+*/
+void dma_isr_premier(void)
+{
+  dmaSPI0rx->clearInterrupt();
+  
+  if (rowZero) {
+    rowZero = false;
+    row = 0;
+    plane++;
+    if (plane >= PLANE_COUNT) {
+      plane = 0;
+    }
+  }
+
+  if (row < ROW_COUNT) {
+    memcpy(wpc_planes[plane][row], plane_buffer, ROW_LENGTH * sizeof(uint16_t));
+    if (plane == (PLANE_COUNT - 1)) {
+      receivedRows |= (1 << row);
+      gotRow = true;
+    }
+    row++;
+  }
+}
+
+#else
 /*
  Combined interrupt for all Port B inputs, Gottlieb/Premier version
 */
@@ -656,7 +776,7 @@ void portb_isr_premier(void)
   } 
   
   // Check for output enable
-  if (isfr & DMD_OE_BITMASK) {   
+  if (isfr & DMD_DOT_LATCH_BITMASK) {   
     if (rowZero) {
       rowZero = false;
       row = 0;
@@ -669,8 +789,14 @@ void portb_isr_premier(void)
     // Use fake chip select to end plane
     digitalWriteFast(DMD_CS, HIGH);
 
-    memcpy(wpc_planes[plane][row], plane_buffer, ROW_LENGTH * sizeof(uint16_t));
- 
+    if (row < ROW_COUNT) {
+      memcpy(wpc_planes[plane][row], plane_buffer, ROW_LENGTH * sizeof(uint16_t));
+      if (plane == (PLANE_COUNT - 1)) {
+        receivedRows |= (1 << row);
+      }
+    }
+    row++;
+
     // Start new SPI plane
     digitalWriteFast(DMD_CS, LOW);
    
@@ -679,19 +805,12 @@ void portb_isr_premier(void)
     dmaSPI0rx->clearComplete();
     dmaSPI0rx->destinationBuffer(plane_buffer, ROW_LENGTH * sizeof(uint16_t));
     dmaSPI0rx->enable();
-
-    row++;
-    if (row >= ROW_COUNT) {
-      row = 0;
-    }
-    else if (plane == (PLANE_COUNT - 1)) {
-      gotRow = true;
-    }
    
     // Start the plane timer
 //    planeStart = micros();
   }
 }
+#endif
 
 /*
  Interrupts for timing output enable
