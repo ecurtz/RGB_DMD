@@ -300,9 +300,9 @@ void calculatePlaneTimings()
 //      }
     }
   }
-  else if (planeTimes[0] < 100) {
-    dmdDataFormat = FORMAT_PREMIER;
-  }
+//  else if (planeTimes[0] < 100) {
+//    dmdDataFormat = FORMAT_PREMIER;
+//  }
 
   for (int i = 0; i < PLANE_COUNT; i++) {
     activePlaneTimes[i] = planeTimes[i];
