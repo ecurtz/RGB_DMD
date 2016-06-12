@@ -31,7 +31,14 @@ void setup() {
       else {
         dots[row][col] = 0;
       }
-      dots[row][col + 64] = col >> 2;
+      if (row < 16)
+      {
+        dots[row][col + 64] = col >> 2;
+      }
+      else
+      {
+        dots[row][col + 64] = 15 - (col >> 2);
+      }
     }
   }
 }
