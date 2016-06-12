@@ -67,12 +67,23 @@ void loop() {
     }
     digitalWriteFast(DMD_DOT_LATCH, LOW);
     asm volatile("nop\n");
+    if (row == 0) {
+       // Extraneous extra latch
+      for (int i = 0; i < 2200; i++) {
+        asm volatile("nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n");
+      }
+      digitalWriteFast(DMD_DOT_LATCH, HIGH);
+      for (int i = 0; i < 4; i++) {
+        asm volatile("nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n");
+      }
+      digitalWriteFast(DMD_DOT_LATCH, LOW);
+    }
     digitalWriteFast(DMD_OE, HIGH);
     asm volatile("nop\n nop\n");
     
-    // Low bit
+    // High bit
     for (int col = 0; col < 128; col++) {
-      if (dots[row][col] & 0x04) {
+      if (dots[row][col] & 0x08) {
         digitalWriteFast(DMD_DOTS, HIGH);
       }
       else {
@@ -111,9 +122,9 @@ void loop() {
       asm volatile("nop\n nop\n nop\n nop\n");
     }
  
-    // High bit
+    // Low bit
     for (int col = 0; col < 128; col++) {
-      if (dots[row][col] & 0x08) {
+      if (dots[row][col] & 0x04) {
         digitalWriteFast(DMD_DOTS, HIGH);
       }
       else {
