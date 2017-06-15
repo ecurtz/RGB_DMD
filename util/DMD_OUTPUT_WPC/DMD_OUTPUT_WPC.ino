@@ -3,8 +3,17 @@
 // Timings valid for 96MHz
 
 // Output pins
+/*
 const static uint8_t  DMD_ROW_DATA = 17;
 const static uint8_t  DMD_ROW_CLK = 16;
+const static uint8_t  DMD_DOT_LATCH = 18;
+const static uint8_t  DMD_OE = 19;
+const static uint8_t  DMD_DOTS = 12;
+const static uint8_t  DMD_DOT_CLK = 13;
+*/
+// RGB_DMD Mini v0.5 10/29/2015
+const static uint8_t  DMD_ROW_DATA = 16;
+const static uint8_t  DMD_ROW_CLK = 17;
 const static uint8_t  DMD_DOT_LATCH = 18;
 const static uint8_t  DMD_OE = 19;
 const static uint8_t  DMD_DOTS = 12;
@@ -41,6 +50,8 @@ void setup() {
       }
     }
   }
+
+  delay(250);
 }
 
 void loop() {
