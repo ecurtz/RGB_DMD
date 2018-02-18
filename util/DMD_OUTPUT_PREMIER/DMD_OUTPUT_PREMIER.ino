@@ -155,7 +155,8 @@ void loop() {
       asm volatile("nop\n");    
     }
      
-    // Goofy Premier has an extra row with no dot clock or enable!         
+    // Goofy Premier has extra rows!
+    for (int row = 0; row < 3; row++) {       
     for (int col = 0; col < COL_COUNT; col++) {
       for (int i = 0; i < 4; i++) {
         asm volatile("nop\n nop\n nop\n");
@@ -186,7 +187,7 @@ void loop() {
       for (int i = 0; i < 16; i++) {
         asm volatile("nop\n nop\n nop\n");
       }
-
+    }
     }
 }
 
